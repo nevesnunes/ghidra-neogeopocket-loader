@@ -15,12 +15,16 @@
  */
 package neogeopocketloader;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import docking.widgets.OptionDialog;
+import docking.widgets.filechooser.GhidraFileChooser;
 import ghidra.app.cmd.data.CreateArrayCmd;
 import ghidra.app.util.Option;
 import ghidra.app.util.bin.BinaryReader;
@@ -77,13 +81,32 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 		
 		InputStream romStream = provider.getInputStream(0);
 		boolean hasRomExtraStream = romStream.available() > 0x200000L;
+		
+		InputStream biosStream = null;
+		int choice = OptionDialog.showOptionNoCancelDialog(
+			null,
+			"BIOS mapping",
+			"Load BIOS file?",
+			"Yes",
+			"No (Just create empty mapping)",
+			OptionDialog.QUESTION_MESSAGE
+		);
+		if (choice == OptionDialog.OPTION_ONE) {
+			GhidraFileChooser chooser = new GhidraFileChooser(null);
+			chooser.setTitle("Open BIOS file");
+			File file = chooser.getSelectedFile(true);
+			if (file != null) {
+				biosStream = new FileInputStream(file);
+			}
+		}
 
 		createSegment(fpa, romStream, "ROM_CART", 0x200000L, Math.min(romStream.available(), 0x1FFFFFL), true, false, true, false, log);
 		if (hasRomExtraStream) {
 			 InputStream romExtraStream = provider.getInputStream(0x200000L);
 			 createSegment(fpa, romExtraStream, "ROM_EXTRA", 0x800000L, Math.min(romExtraStream.available(), 0x1FFFFFL), true, false, true, false, log);
 		}
-		createSegment(fpa, null, "ROM_BIOS",      0xFF0000L, 0x010000L, true, false, true, false, log);
+		createSegment(fpa, biosStream, "ROM_BIOS", 0xFF0000L, 0x010000L, true, false, true, false, log);
+		
 		createSegment(fpa, null, "RAM_INTERNAL",  0x000000L, 0x000100L, true, true, false, true, log);
 		createSegment(fpa, null, "RAM_WORK",      0x000100L, 0x006B00L, true, true, false, true, log);
 		createSegment(fpa, null, "CPU_WORKSPACE", 0x006C00L, 0x000400L, true, true, false, true, log);
