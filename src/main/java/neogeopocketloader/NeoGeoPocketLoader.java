@@ -1,12 +1,13 @@
+
 /* ###
  * IP: GHIDRA
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,14 +22,19 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import docking.widgets.OptionDialog;
 import docking.widgets.filechooser.GhidraFileChooser;
 import ghidra.app.cmd.data.CreateArrayCmd;
+import ghidra.app.cmd.data.CreateDataCmd;
+import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.util.Option;
 import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.ByteProvider;
+import ghidra.app.util.bin.MemoryByteProvider;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.AbstractLibrarySupportLoader;
 import ghidra.app.util.opinion.LoadSpec;
@@ -37,14 +43,13 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.ByteDataType;
 import ghidra.program.model.data.DWordDataType;
 import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.PointerDataType;
 import ghidra.program.model.data.WordDataType;
 import ghidra.program.model.lang.LanguageCompilerSpecPair;
+import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Program;
-import ghidra.program.model.mem.Memory;
-import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.SourceType;
-import ghidra.program.model.util.CodeUnitInsertionException;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
@@ -78,10 +83,10 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 			throws CancelledException, IOException {
 		BinaryReader reader = new BinaryReader(provider, true);
 		FlatProgramAPI fpa = new FlatProgramAPI(program, monitor);
-		
+
 		InputStream romStream = provider.getInputStream(0);
 		boolean hasRomExtraStream = romStream.available() > 0x200000L;
-		
+
 		InputStream biosStream = null;
 		int choice = OptionDialog.showOptionNoCancelDialog(
 			null,
@@ -106,19 +111,14 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 			 createSegment(fpa, romExtraStream, "ROM_EXTRA", 0x800000L, Math.min(romExtraStream.available(), 0x1FFFFFL), true, false, true, false, log);
 		}
 		createSegment(fpa, biosStream, "ROM_BIOS", 0xFF0000L, 0x010000L, true, false, true, false, log);
-		
-		createSegment(fpa, null, "RAM_INTERNAL",  0x000000L, 0x000100L, true, true, false, true, log);
-		createSegment(fpa, null, "RAM_WORK",      0x000100L, 0x006B00L, true, true, false, true, log);
-		createSegment(fpa, null, "CPU_WORKSPACE", 0x006C00L, 0x000400L, true, true, false, true, log);
-		createSegment(fpa, null, "RAM_SOUND",     0x007000L, 0x001000L, true, true, false, true, log);
-		createSegment(fpa, null, "RAM_VIDEO",     0x008000L, 0x004000L, true, true, false, true, log);
 
-		reader.setPointerIndex(0x1c);
-		long entry = reader.readNextUnsignedInt();
-		Address entryAddress = fpa.toAddr(entry);
-		fpa.createFunction(entryAddress, "entry");
-		fpa.addEntryPoint(entryAddress);
-		
+		createSegment(fpa, null, "IO_INTERNAL",   0x000000L, 0x000100L, true, true, false, true, log);
+		createSegment(fpa, null, "RAM_RESERVED",  0x000100L, 0x003F00L, true, true, false, true, log);
+		createSegment(fpa, null, "CPU_RAM",       0x004000L, 0x002C00L, true, true, false, false, log);
+		createSegment(fpa, null, "CPU_WORKSPACE", 0x006C00L, 0x000400L, true, true, false, false, log);
+		createSegment(fpa, null, "APU_RAM",       0x007000L, 0x001000L, true, true, false, false, log);
+		createSegment(fpa, null, "VIDEO_RAM",     0x008000L, 0x004000L, true, true, false, false, log);
+
 		createNamedData(fpa, program, 0x0020L, "TRUN", ByteDataType.dataType, log);
 		createNamedData(fpa, program, 0x0022L, "TREG0", ByteDataType.dataType, log);
 		createNamedData(fpa, program, 0x0023L, "TREG1", ByteDataType.dataType, log);
@@ -238,6 +238,64 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 		createNamedArray(fpa, program, 0x9800L, "Scroll_2_Map", 0x800, ByteDataType.dataType, log);
 		createNamedArray(fpa, program, 0xA000L, "Pattern_Table", 0x2000, ByteDataType.dataType, log);
 
+		reader.setPointerIndex(0x1c);
+		long entry = reader.readNextUnsignedInt();
+		Address entryAddress = fpa.toAddr(entry);
+		fpa.createFunction(entryAddress, "entry");
+		fpa.addEntryPoint(entryAddress);
+
+		long biosBase = 0xFFFE00L;
+		Map <Long, String> mappings = new HashMap<>();
+		mappings.put(biosBase + 4 * 0x00, "VECT_SHUTDOWN");
+		mappings.put(biosBase + 4 * 0x01, "VECT_CLOCKGEARSET");
+		mappings.put(biosBase + 4 * 0x02, "VECT_RTCGET");
+		mappings.put(biosBase + 4 * 0x03, "VECT_UNK_03");
+		mappings.put(biosBase + 4 * 0x04, "VECT_INTLVSET");
+		mappings.put(biosBase + 4 * 0x05, "VECT_SYSFONTSET");
+		mappings.put(biosBase + 4 * 0x06, "VECT_FLASHWRITE");
+		mappings.put(biosBase + 4 * 0x07, "VECT_FLASHALLERS");
+		mappings.put(biosBase + 4 * 0x08, "VECT_FLASHERS");
+		mappings.put(biosBase + 4 * 0x09, "VECT_ALARMSET");
+		mappings.put(biosBase + 4 * 0x0a, "VECT_UNK_0a");
+		mappings.put(biosBase + 4 * 0x0b, "VECT_ALARMDOWNSET");
+		mappings.put(biosBase + 4 * 0x0c, "VECT_UNK_0c");
+		mappings.put(biosBase + 4 * 0x0d, "VECT_FLASHPROTECT");
+		mappings.put(biosBase + 4 * 0x0e, "VECT_GETMODESET");
+		mappings.put(biosBase + 4 * 0x0f, "VECT_UNK_0f");
+		mappings.put(biosBase + 4 * 0x10, "VECT_COMINIT");
+		mappings.put(biosBase + 4 * 0x11, "VECT_COMSENDSTART");
+		mappings.put(biosBase + 4 * 0x12, "VECT_COMRECEIVESTART");
+		mappings.put(biosBase + 4 * 0x13, "VECT_COMCREATEDATA");
+		mappings.put(biosBase + 4 * 0x14, "VECT_COMGETDATA");
+		mappings.put(biosBase + 4 * 0x15, "VECT_COMONRTS");
+		mappings.put(biosBase + 4 * 0x16, "VECT_COMOFFRTS");
+		mappings.put(biosBase + 4 * 0x17, "VECT_COMSENDSTATUS");
+		mappings.put(biosBase + 4 * 0x18, "VECT_COMRECEIVESTATUS");
+		mappings.put(biosBase + 4 * 0x19, "VECT_COMCREATEBUFDATA");
+		mappings.put(biosBase + 4 * 0x1a, "VECT_COMGETBUFDATA");
+		mappings.put(0xFFFF00L, "VECT_HWRESET");
+		mappings.forEach((address, name) -> {
+			createNamedData(fpa, program, address, name, PointerDataType.dataType, log);
+		});
+
+		final boolean isBiosLoaded = biosStream != null;
+		if (isBiosLoaded) {
+			ByteProvider biosProvider = new MemoryByteProvider(fpa.getCurrentProgram().getMemory(), fpa.toAddr(0));
+			BinaryReader biosReader = new BinaryReader(biosProvider, true);
+			biosReader.setPointerIndex(biosBase);
+			for (int i = 0; i < 0x200; i += 4) {
+				long vec = biosReader.readNextUnsignedInt();
+				if (vec == 0) {
+					continue;
+				}
+
+				monitor.setMessage(String.format("Disassembling @ 0x%08x", vec));
+				long vecEntry = biosBase + i;
+				fpa.createFunction(fpa.toAddr(vec), mappings.getOrDefault(vecEntry, null));
+				new DisassembleCommand(fpa.toAddr(vec), null, true).applyTo(program);
+			}
+		}
+
 		monitor.setMessage(String.format("%s : Loading done", getName()));
 	}
 
@@ -262,7 +320,7 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 			log.appendException(e);
 		}
 	}
-	
+
 	private void createNamedArray(FlatProgramAPI fpa, Program program, long address, String name, int numElements, DataType type, MessageLog log) {
 		try {
 			CreateArrayCmd arrayCmd = new CreateArrayCmd(fpa.toAddr(address), numElements, type, type.getLength());
@@ -286,6 +344,8 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 				fpa.createWord(fpa.toAddr(address));
 			} else if (type.equals(DWordDataType.dataType)) {
 				fpa.createDWord(fpa.toAddr(address));
+			} else if (type.equals(PointerDataType.dataType)) {
+				new CreateDataCmd(fpa.toAddr(address), new PointerDataType()).applyTo(program);
 			}
 			program.getSymbolTable().createLabel(fpa.toAddr(address), name, SourceType.IMPORTED);
 		} catch (Exception e) {
