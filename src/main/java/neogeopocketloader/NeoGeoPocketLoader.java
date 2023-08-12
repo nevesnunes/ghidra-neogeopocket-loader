@@ -86,10 +86,14 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 		InputStream romStream = provider.getInputStream(0);
 		boolean hasRomExtraStream = romStream.available() > 0x200000L;
 
+		reader.setPointerIndex(0x23);
+		boolean isNGPC = reader.readNextUnsignedByte() == 0x10;
+
 		InputStream biosStream = null;
-		File biosFile = new File("/tmp/ngp_bios.ngp");
+		File biosFile = new File(isNGPC ?  "/tmp/ngpcbios.rom" : "/tmp/ngp_bios.ngp");
 		if (biosFile.isFile()) {
 			biosStream = new FileInputStream(biosFile);
+			monitor.setMessage(String.format("Loading BIOS @ %s", biosFile));
 		} else {
 			int choice = OptionDialog.showOptionNoCancelDialog(
 				null,
