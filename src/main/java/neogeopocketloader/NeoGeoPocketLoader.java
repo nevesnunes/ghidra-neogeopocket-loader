@@ -113,10 +113,13 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 			}
 		}
 
-		createSegment(fpa, romStream, "ROM_CART", 0x200000L, Math.min(romStream.available(), 0x1FFFFFL), true, false, true, false, log);
+		// We must allocate maximum program size, since higher addresses are commonly
+		// written to during BIOS initialization routines... Program code also performs 
+		// integrity checks on such addresses.
+		createSegment(fpa, romStream, "ROM_CART", 0x200000L, Math.max(romStream.available(), 0x1FFFFFL), true, true, true, false, log);
 		if (hasRomExtraStream) {
 			 InputStream romExtraStream = provider.getInputStream(0x200000L);
-			 createSegment(fpa, romExtraStream, "ROM_EXTRA", 0x800000L, Math.min(romExtraStream.available(), 0x1FFFFFL), true, false, true, false, log);
+			 createSegment(fpa, romExtraStream, "ROM_EXTRA", 0x800000L, Math.max(romExtraStream.available(), 0x1FFFFFL), true, true, true, false, log);
 		}
 		createSegment(fpa, biosStream, "ROM_BIOS", 0xFF0000L, 0x010000L, true, false, true, false, log);
 
@@ -217,6 +220,7 @@ public class NeoGeoPocketLoader extends AbstractLibrarySupportLoader {
 		createNamedData(fpa,  program, 0x6C04L, "Game_Catalogue_Id", WordDataType.dataType, log);
 		createNamedData(fpa,  program, 0x6C06L, "Game_Subcatalogue_Id", ByteDataType.dataType, log);
 		createNamedArray(fpa, program, 0x6C08L, "Game_Name", 12, ByteDataType.dataType, log);
+		createNamedData(fpa,  program, 0x6C16L, "Ticks_Since_Last_Btn_Down", WordDataType.dataType, log);
 		createNamedData(fpa,  program, 0x6C55L, "Game_Type", ByteDataType.dataType, log);
 		createNamedData(fpa,  program, 0x6C58L, "EEPROM_LO_Type", ByteDataType.dataType, log);
 		createNamedData(fpa,  program, 0x6C59L, "EEPROM_HI_Type", ByteDataType.dataType, log);
